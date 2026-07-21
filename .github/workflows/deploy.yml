@@ -15,8 +15,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Create FlyYab Tools project
+        shell: bash
         run: |
-          rm -rf app pages public styles
+          rm -rf app pages public styles node_modules .next
           rm -f package.json package-lock.json next.config.js next.config.mjs jsconfig.json
 
           mkdir -p pages public styles
@@ -35,6 +36,9 @@ jobs:
               "next": "14.0.4",
               "react": "18.2.0",
               "react-dom": "18.2.0"
+            },
+            "engines": {
+              "node": ">=20 <23"
             }
           }
           EOF
@@ -69,13 +73,19 @@ jobs:
                     name="description"
                     content="ابزارهای هوشمند سفر فلای‌یاب"
                   />
+                  <meta
+                    name="viewport"
+                    content="width=device-width, initial-scale=1"
+                  />
                 </Head>
 
                 <main className="page">
                   <section className="card">
                     <div className="brand">FlyYab</div>
                     <h1>ابزارهای هوشمند سفر فلای‌یاب</h1>
-                    <p>زیرساخت ابزارهای فلای‌یاب با موفقیت راه‌اندازی شده است.</p>
+                    <p>
+                      زیرساخت ابزارهای فلای‌یاب با موفقیت راه‌اندازی شده است.
+                    </p>
                     <div className="status">سامانه آماده توسعه است</div>
                   </section>
                 </main>
@@ -136,8 +146,8 @@ jobs:
           }
 
           p {
-            margin: 0 auto;
             max-width: 560px;
+            margin: 0 auto;
             color: #52657c;
             font-size: 18px;
             line-height: 1.9;
@@ -152,14 +162,37 @@ jobs:
             color: #0878d1;
             font-weight: 700;
           }
+
+          @media (max-width: 600px) {
+            .page {
+              padding: 14px;
+            }
+
+            .card {
+              padding: 36px 20px;
+              border-radius: 20px;
+            }
+          }
           EOF
 
           echo "flyyab-tools-ok" > public/health.txt
 
-          npm install
+          # بسیار مهم:
+          # هیچ npm install یا package-lock.json در GitHub ساخته نمی‌شود.
+          rm -f package-lock.json
+
+          echo "Project files created successfully."
+          echo "Checking that package-lock.json does not exist..."
+
+          if [ -f package-lock.json ]; then
+            echo "ERROR: package-lock.json still exists."
+            exit 1
+          fi
+
+          echo "No package-lock.json found. Liara should use npm install."
 
       - name: Install Liara CLI
-        run: npm install -g @liara/cli
+        run: npm install --global @liara/cli@9.4.7
 
       - name: Deploy to Liara
         env:
