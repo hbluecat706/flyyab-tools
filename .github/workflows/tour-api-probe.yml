@@ -8,5 +8,5 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
-      - name: Live E2E tour API
-        run: python tools/tour_api_probe.py
+      - name: Extract live route hydration
+        run: python tools/tour_hydration_probe.py
