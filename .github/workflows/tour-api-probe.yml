@@ -10,60 +10,87 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Extract exact live tour request construction
+      - name: Probe token and airport source
         shell: bash
         run: |
           python - <<'PY'
-          import re, ssl, urllib.request, urllib.parse, json
+          import re, ssl, urllib.request, urllib.parse, json, http.cookiejar, time
 
           TARGET='https://flyyab.ir/tours/tehran-mashhad?departing=1405-06-20&returning=1405-06-23&rooms=1&adt%5B0%5D=2'
+          BASE='https://FlyYab.ir/_booking/'
           UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128 Safari/537.36'
           ctx=ssl.create_default_context()
-          def get(url):
-              req=urllib.request.Request(url,headers={'User-Agent':UA,'Accept':'*/*','Accept-Language':'fa-IR,fa;q=0.9,en;q=0.8'})
-              with urllib.request.urlopen(req,timeout=30,context=ctx) as r:
-                  return r.status,r.geturl(),dict(r.headers),r.read()
+          cj=http.cookiejar.CookieJar()
+          opener=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj), urllib.request.HTTPSHandler(context=ctx))
 
-          st,final,h,raw=get(TARGET)
+          def req(url, method='GET', body=None, headers=None, timeout=30):
+              h={'User-Agent':UA,'Accept':'*/*','Accept-Language':'fa-IR,fa;q=0.9,en;q=0.8','Origin':'https://flyyab.ir','Referer':TARGET}
+              if headers: h.update(headers)
+              data=None
+              if body is not None:
+                  data=json.dumps(body,separators=(',',':'),ensure_ascii=False).encode()
+                  h['Content-Type']='application/json'
+              r=urllib.request.Request(url,data=data,headers=h,method=method)
+              try:
+                  with opener.open(r,timeout=timeout) as x:
+                      raw=x.read(); return x.status,x.geturl(),dict(x.headers),raw
+              except urllib.error.HTTPError as e:
+                  raw=e.read(); return e.code,e.geturl(),dict(e.headers),raw
+
+          st,final,h,raw=req(TARGET)
           html=raw.decode('utf-8','replace')
           print('PAGE',st,len(raw),final)
+          print('COOKIES',[(c.name,len(c.value)) for c in cj])
 
-          # Config values visible in server payload
-          for key in ['pvDomain','plusApi','plusBooking','hasTrain','hasWebservice','agencyID','defCurrency']:
-              vals=[]
-              for pat in [rf'"{re.escape(key)}"\s*:\s*("[^"]*"|true|false|null|\d+|\{{[^\n<]*?\}})',rf'\\"{re.escape(key)}\\"\s*:\s*\\"([^\\"]*)\\"']:
-                  vals += re.findall(pat,html)
-              print('CONFIG',key,vals[:5])
+          for term in ['MHD','THR','Mashhad','مشهد','cityID','safarID','airports']:
+              hits=[]; start=0
+              while len(hits)<5:
+                  i=html.find(term,start)
+                  if i<0: break
+                  hits.append(html[max(0,i-800):min(len(html),i+1800)].replace('\n',' '))
+                  start=i+len(term)
+              print('\nHTML_TERM',term,'COUNT_SHOWN',len(hits))
+              for sn in hits: print(sn[:2600])
 
           scripts=[]
           for src in re.findall(r'<script[^>]+src=["\']([^"\']+\.js)["\']',html,re.I):
               scripts.append(urllib.parse.urljoin(final,src))
           scripts=list(dict.fromkeys(scripts))
-          route=[u for u in scripts if '/tours/%5Broute%5D/' in u or '/tours/[route]/' in u]
-          if not route:
-              raise SystemExit('ROUTE_CHUNK_NOT_FOUND')
-          ru=route[0]
-          s,fu,hh,b=get(ru)
-          txt=b.decode('utf-8','replace')
-          print('ROUTE_CHUNK',s,len(b),fu)
+          print('SCRIPT_COUNT',len(scripts))
 
-          terms=['tourFromCityIata','tourToCityIata','room-1-ad-num','room-1-child-numbers','dateIn','dateOut','mixMode','tG=','tM=','tO=','home/token/getVersion','getVersion']
-          for term in terms:
-              print('\n### TERM',term)
-              start=0; n=0
-              while n<8:
-                  idx=txt.find(term,start)
-                  if idx<0: break
-                  a=max(0,idx-2400); z=min(len(txt),idx+4200)
-                  print('OCC',n+1,'IDX',idx)
-                  print(txt[a:z].replace('\n',' '))
-                  start=idx+len(term); n+=1
-              print('COUNT_SHOWN',n)
+          terms=['home/token/getVersion','getVersion','allAirport','cityID','safarID','airports','/airport','airport/','version']
+          matched_files=[]
+          for u in scripts:
+              s,fu,hh,b=req(u)
+              txt=b.decode('utf-8','replace')
+              ms=[t for t in terms if t in txt]
+              if not ms: continue
+              matched_files.append((fu,ms))
+              print('\n=== JS',fu,'STATUS',s,'BYTES',len(b),'TERMS',ms,'===')
+              for term in ms:
+                  start=0;n=0
+                  while n<4:
+                      i=txt.find(term,start)
+                      if i<0: break
+                      print('\nTERM',term,'IDX',i)
+                      print(txt[max(0,i-2200):min(len(txt),i+4200)].replace('\n',' '))
+                      start=i+len(term); n+=1
+          print('\nMATCHED_FILES',json.dumps(matched_files,ensure_ascii=False))
 
-          # Find any compact helper assignments containing the key tour fields.
-          for m in re.finditer(r'.{0,1000}tourFromCityIata.{0,5000}',txt):
-              sn=m.group(0)
-              if 'dateIn' in sn and ('roomNum' in sn or 'adt' in sn):
-                  print('\n### PAYLOAD_HELPER_CANDIDATE')
-                  print(sn)
+          print('\n=== TOKEN ATTEMPTS ===')
+          variants=[
+            {'token':'','lang':'fa','hasTrain':False,'clientVer':''},
+            {'token':'','lang':'fa','hasTrain':False,'clientVer':'2.8.0'},
+            {'token':'','lang':'fa','hasTrain':True,'clientVer':''},
+            {'token':'','lang':'fa','hasTrain':True,'clientVer':'2.8.0'},
+          ]
+          for body in variants:
+              s,u,hh,b=req(BASE+'home/token/getVersion','POST',body)
+              txt=b.decode('utf-8','replace')
+              print('TOKEN_ATTEMPT',body,'HTTP',s,'BYTES',len(b),'BODY',txt[:1800])
+              try:
+                  j=json.loads(txt)
+                  tok=j.get('token') if isinstance(j,dict) else None
+                  if tok: print('TOKEN_OK','len',len(str(tok)),'masked',str(tok)[:6]+'...'+str(tok)[-4:])
+              except Exception: pass
           PY
