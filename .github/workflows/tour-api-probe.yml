@@ -1,226 +1,136 @@
 name: FlyYab Tour API Probe
-
 on:
   push:
-    branches:
-      - tour-api-probe-20260907
-
+    branches: [tour-api-probe-20260907]
 jobs:
   probe:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - name: End-to-end live tour API verification
+      - name: Live E2E tour API
         shell: bash
         run: |
           python - <<'PY'
-          import json, ssl, urllib.request, urllib.error, http.cookiejar, time, re, sys
+          import json,ssl,urllib.request,urllib.error,http.cookiejar,time,re,sys
           from collections import Counter
-
           PAGE='https://flyyab.ir/tours/tehran-mashhad?departing=1405-06-20&returning=1405-06-23&rooms=1&adt%5B0%5D=2'
-          BOOK='https://FlyYab.ir/_booking/'
-          PLUS='https://FlyYab.ir/_bookingplus/public/api/'
-          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128 Safari/537.36'
+          BOOK='https://flyyab.ir/_booking/'
+          PLUS='https://flyyab.ir/_bookingplus/public/api/'
+          UA='Mozilla/5.0 Chrome/128 Safari/537.36'
           ctx=ssl.create_default_context(); cj=http.cookiejar.CookieJar()
-          opener=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj),urllib.request.HTTPSHandler(context=ctx))
-
-          def call(url,method='GET',body=None,headers=None,timeout=45):
-              h={'User-Agent':UA,'Accept':'application/json,text/plain,*/*','Accept-Language':'fa-IR,fa;q=0.9,en;q=0.8','Origin':'https://flyyab.ir','Referer':PAGE}
-              if headers: h.update(headers)
+          op=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj),urllib.request.HTTPSHandler(context=ctx))
+          def call(url,method='GET',body=None,headers=None):
+              h={'User-Agent':UA,'Accept':'application/json,text/plain,*/*','Origin':'https://flyyab.ir','Referer':PAGE}
+              if headers:h.update(headers)
               data=None
               if body is not None:
-                  data=json.dumps(body,separators=(',',':'),ensure_ascii=False).encode('utf-8')
-                  h['Content-Type']='application/json'
-              rq=urllib.request.Request(url,data=data,headers=h,method=method)
+                  data=json.dumps(body,separators=(',',':'),ensure_ascii=False).encode();h['Content-Type']='application/json'
+              q=urllib.request.Request(url,data=data,headers=h,method=method)
               try:
-                  with opener.open(rq,timeout=timeout) as r:
-                      raw=r.read(); return r.status,dict(r.headers),raw
-              except urllib.error.HTTPError as e:
-                  return e.code,dict(e.headers),e.read()
-
-          def js(raw):
-              try:return json.loads(raw.decode('utf-8','replace'))
-              except Exception:return None
-
-          def status_of(x):
-              if not isinstance(x,dict): return None
-              return x.get('status',x.get('Status'))
-
-          def mask(x):
-              s=str(x or '')
-              return (s[:6]+'...'+s[-4:]) if len(s)>12 else ('***' if s else '')
-
-          def walk(obj,p=''):
-              if isinstance(obj,dict):
-                  for k,v in obj.items(): yield from walk(v,f'{p}.{k}' if p else str(k))
-              elif isinstance(obj,list):
-                  for i,v in enumerate(obj): yield from walk(v,f'{p}[{i}]')
-              else: yield p,obj
-
-          def find_city(data, needle):
-              needle=needle.lower()
-              found=[]
-              def rec(x,country=None):
-                  if isinstance(x,dict):
-                      ctry=x.get('countryID',x.get('CountryID',country))
-                      cityfa=str(x.get('cityFa',x.get('CityFa','')))
-                      cityen=str(x.get('cityEn',x.get('CityEn','')))
-                      airports=x.get('airports',x.get('Airports'))
-                      if x.get('cityID') is not None and (needle in cityfa.lower() or needle in cityen.lower() or any(needle==str(a.get('iata','')).lower() for a in airports or [] if isinstance(a,dict))):
-                          found.append((x,ctry))
-                      for v in x.values(): rec(v,ctry)
-                  elif isinstance(x,list):
-                      for v in x: rec(v,country)
-              rec(data)
-              return found
-
-          def flatten_flights(v):
-              out=[]
+                  with op.open(q,timeout=50) as r:return r.status,r.read()
+              except urllib.error.HTTPError as e:return e.code,e.read()
+          def J(b):
+              try:return json.loads(b.decode('utf-8','replace'))
+              except:return None
+          def S(x):return x.get('status',x.get('Status')) if isinstance(x,dict) else None
+          def walk(x,p=''):
+              if isinstance(x,dict):
+                  for k,v in x.items():yield from walk(v,f'{p}.{k}' if p else k)
+              elif isinstance(x,list):
+                  for i,v in enumerate(x):yield from walk(v,f'{p}[{i}]')
+              else:yield p,x
+          def city_matches(x,needle,country=None,out=None):
+              if out is None:out=[]
+              if isinstance(x,dict):
+                  c=x.get('countryID',x.get('CountryID',country)); aps=x.get('airports') or []
+                  text=(str(x.get('cityFa',''))+' '+str(x.get('cityEn',''))).lower()
+                  if x.get('cityID') is not None and (needle.lower() in text or any(str(a.get('iata','')).lower()==needle.lower() for a in aps if isinstance(a,dict))):out.append((x,c))
+                  for v in x.values():city_matches(v,needle,c,out)
+              elif isinstance(x,list):
+                  for v in x:city_matches(v,needle,country,out)
+              return out
+          def fl(v):
+              o=[]
               if isinstance(v,list):
-                  for z in v:
-                      if isinstance(z,dict): out.append(z)
-                      elif isinstance(z,(list,dict)): out += flatten_flights(z)
+                  for z in v:o += [z] if isinstance(z,dict) else fl(z)
               elif isinstance(v,dict):
-                  for z in v.values(): out += flatten_flights(z)
+                  for z in v.values():o+=fl(z)
+              return o
+          def hotel_candidates(x,p=''):
+              out=[]
+              if isinstance(x,dict):
+                  for k,v in x.items():
+                      np=f'{p}.{k}' if p else k
+                      if isinstance(v,list) and v and isinstance(v[0],dict) and re.search(r'hotel|descriptive|content',np,re.I):out.append((np,v))
+                      elif isinstance(v,dict):out+=hotel_candidates(v,np)
               return out
 
-          def get_hotel_items(obj):
-              candidates=[]
-              if isinstance(obj,dict):
-                  for key in ['hotels','Hotels','HotelDescriptiveContents','hotelDescriptiveContents','data','result']:
-                      v=obj.get(key)
-                      if isinstance(v,list) and v and isinstance(v[0],dict): candidates.append((key,v))
-                      if isinstance(v,dict):
-                          for kk,vv in v.items():
-                              if isinstance(vv,list) and vv and isinstance(vv[0],dict): candidates.append((f'{key}.{kk}',vv))
-                  for k,v in obj.items():
-                      if isinstance(v,dict):
-                          sub=get_hotel_items(v)
-                          if sub[1]: candidates.append((f'{k}.{sub[0]}',sub[1]))
-              return max(candidates,key=lambda z:len(z[1]),default=('',[]))
+          print('PAGE_HTTP',call(PAGE)[0])
+          ht,tr=call(BOOK+'home/token/getVersion','POST',{'token':'','lang':'fa','hasTrain':False,'clientVer':''});tj=J(tr);st=tj.get('token') if isinstance(tj,dict) else None
+          print('TOKEN',ht,S(tj),tj.get('version') if isinstance(tj,dict) else None,'LEN',len(st or ''))
+          if not st:print(tr[:1500]);sys.exit(10)
 
-          print('=== 1 PAGE ===')
-          hp,_,raw=call(PAGE)
-          print('PAGE_HTTP',hp,'BYTES',len(raw))
-          if hp!=200: sys.exit('PAGE_FAILED')
+          ha,ar=call(BOOK+'home/airportWithCountry','POST',{'version':''},{'authorization':st});aj=J(ar)
+          print('AIRPORT',ha,S(aj),'BYTES',len(ar),'KEYS',list(aj)[:15] if isinstance(aj,dict) else type(aj).__name__)
+          th=city_matches(aj,'tehran') or city_matches(aj,'تهران') or city_matches(aj,'ika')
+          mh=city_matches(aj,'mashhad') or city_matches(aj,'مشهد') or city_matches(aj,'mhd')
+          print('CITY_MATCHES',len(th),len(mh))
+          if not th or not mh:print(json.dumps(aj,ensure_ascii=False)[:5000]);sys.exit(11)
+          te,tc=th[0];ma,mc=mh[0]
+          print('TEHRAN',json.dumps(te,ensure_ascii=False)[:1800],'COUNTRY',tc)
+          print('MASHHAD',json.dumps(ma,ensure_ascii=False)[:1800],'COUNTRY',mc)
+          dep=(te.get('airports') or [{}])[0].get('iata');arr=(ma.get('airports') or [{}])[0].get('iata')
+          cid=f"{ma.get('cityID')}_{ma.get('safarID')}_{mc}"
+          print('ROUTE',dep,arr,'CID',cid)
+          p={'activeTab':'TOUR-D','tourType':1,'tourFromCityIata':dep,'tourToCityIata':arr,'dateIn':'1405-06-20','dateOut':'1405-06-23','cabinType':'Economy','mixMode':'flight','cityID':cid,'selectedTourItm':None,'tourCode':None,'selectedTourDate':None,'roomNum':1,'room-1-ad-num':2,'room-1-child-numbers':0,'child-age-1-1':0,'child-age-1-2':0,'child-age-1-3':0,'room-2-ad-num':0,'room-2-child-numbers':0,'child-age-2-1':0,'child-age-2-2':0,'child-age-2-3':0,'room-3-ad-num':0,'room-3-child-numbers':0,'child-age-3-1':0,'child-age-3-2':0,'child-age-3-3':0,'token':st,'adt':2,'chd':0,'inf':0}
 
-          print('\n=== 2 SESSION TOKEN ===')
-          token_body={'token':'','lang':'fa','hasTrain':False,'clientVer':''}
-          ht,_,traw=call(BOOK+'home/token/getVersion','POST',token_body)
-          tj=js(traw); st=tj.get('token') if isinstance(tj,dict) else None
-          print('TOKEN_HTTP',ht,'STATUS',status_of(tj),'VERSION',tj.get('version') if isinstance(tj,dict) else None,'TOKEN',mask(st))
-          if ht!=200 or not st: print(traw[:1500]); sys.exit('TOKEN_FAILED')
+          hs,sr=call(BOOK+'tours/app/search','POST',p,{'authorization':st});sj=J(sr)
+          hc=hotel_candidates(sj); hp,hi=max(hc,key=lambda z:len(z[1]),default=('',[]))
+          print('TOUR_SEARCH',hs,S(sj),'BYTES',len(sr),'KEYS',list(sj)[:30] if isinstance(sj,dict) else None,'HOTELS',len(hi),'PATH',hp)
+          if hi:
+              print('TOUR_HOTEL_KEYS',list(hi[0])[:80])
+              print('TOUR_HOTEL_FIELDS',json.dumps([(a,b) for a,b in walk(hi[0]) if re.search(r'name|star|price|adult|total|room|hotel',a,re.I)][:100],ensure_ascii=False,default=str)[:7000])
+          if not isinstance(sj,dict):print(sr[:3000])
 
-          print('\n=== 3 AIRPORT DATA ===')
-          ha,_,araw=call(BOOK+'home/airportWithCountry','POST',{'version':''},headers={'authorization':st})
-          aj=js(araw)
-          print('AIRPORT_HTTP',ha,'STATUS',status_of(aj),'BYTES',len(araw),'KEYS',list(aj.keys())[:20] if isinstance(aj,dict) else None)
-          if not isinstance(aj,(dict,list)):
-              print(araw[:2000]); sys.exit('AIRPORT_JSON_FAILED')
-          th=find_city(aj,'tehran') or find_city(aj,'تهران') or find_city(aj,'ika')
-          mh=find_city(aj,'mashhad') or find_city(aj,'مشهد') or find_city(aj,'mhd')
-          print('TEHRAN_MATCHES',len(th),'MASHHAD_MATCHES',len(mh))
-          if not th or not mh:
-              print('AIRPORT_SAMPLE',json.dumps(aj,ensure_ascii=False)[:6000]); sys.exit('CITY_LOOKUP_FAILED')
-          te,te_country=th[0]; ma,ma_country=mh[0]
-          print('TEHRAN_RAW',json.dumps({k:te.get(k) for k in ['cityID','cityFa','cityEn','safarID','airports']},ensure_ascii=False)[:2500],'COUNTRY',te_country)
-          print('MASHHAD_RAW',json.dumps({k:ma.get(k) for k in ['cityID','cityFa','cityEn','safarID','airports']},ensure_ascii=False)[:2500],'COUNTRY',ma_country)
-          def first_iata(c):
-              a=c.get('airports') or []
-              return str(a[0].get('iata')) if a and isinstance(a[0],dict) else ''
-          dep_iata=first_iata(te); arr_iata=first_iata(ma)
-          city_comp=f"{ma.get('cityID')}_{ma.get('safarID')}_{ma_country}"
-          print('ROUTE_IATA',dep_iata,'->',arr_iata,'DEST_COMPOSITE_ID',city_comp)
-
-          payload={
-            'activeTab':'TOUR-D','tourType':1,'tourFromCityIata':dep_iata,'tourToCityIata':arr_iata,
-            'dateIn':'1405-06-20','dateOut':'1405-06-23','cabinType':'Economy','mixMode':'flight',
-            'cityID':city_comp,'selectedTourItm':None,'tourCode':None,'selectedTourDate':None,'roomNum':1,
-            'room-1-ad-num':2,'room-1-child-numbers':0,'child-age-1-1':0,'child-age-1-2':0,'child-age-1-3':0,
-            'room-2-ad-num':0,'room-2-child-numbers':0,'child-age-2-1':0,'child-age-2-2':0,'child-age-2-3':0,
-            'room-3-ad-num':0,'room-3-child-numbers':0,'child-age-3-1':0,'child-age-3-2':0,'child-age-3-3':0,
-            'token':st,'adt':2,'chd':0,'inf':0
-          }
-          print('\n=== 4 TOUR SEARCH ===')
-          hs,_,sraw=call(BOOK+'tours/app/search','POST',payload,headers={'authorization':st})
-          sj=js(sraw)
-          print('TOUR_HTTP',hs,'STATUS',status_of(sj),'BYTES',len(sraw),'KEYS',list(sj.keys())[:40] if isinstance(sj,dict) else None)
-          if isinstance(sj,dict):
-              hpath,hitems=get_hotel_items(sj)
-              print('TOUR_HOTEL_PATH',hpath,'TOUR_HOTEL_COUNT',len(hitems))
-              if hitems:
-                  print('TOUR_FIRST_HOTEL_KEYS',list(hitems[0].keys())[:80])
-                  scal=[(p,v) for p,v in walk(hitems[0]) if re.search(r'(hotel|name|star|price|adult|total|room)',p,re.I)]
-                  print('TOUR_FIRST_HOTEL_FIELDS',json.dumps(scal[:80],ensure_ascii=False,default=str)[:6000])
-              for k in ['rule','targetCurrency','exchange','flightOffSystem','markupAdv']:
-                  if k in sj: print('TOUR_META',k,json.dumps(sj[k],ensure_ascii=False,default=str)[:1200])
-          if hs!=200 or not isinstance(sj,dict) or str(status_of(sj)).lower() not in ('success','true','1','ok'):
-              print('TOUR_BODY',sraw.decode('utf-8','replace')[:4000])
-
-          print('\n=== 5 FLIGHT TOKEN ===')
-          fb={'departure':dep_iata,'arrival':arr_iata,'date':'1405-06-20','adult':2,'child':0,'infant':0,'retDate':'1405-06-23','hasReturnAirline':False}
-          hf,_,fraw=call(PLUS+'hub/check-route','POST',fb)
-          fj=js(fraw); ft=fj.get('token') if isinstance(fj,dict) else None
-          print('FLIGHT_TOKEN_HTTP',hf,'STATUS',status_of(fj),'TOKEN',mask(ft),'BODY',json.dumps(fj,ensure_ascii=False,default=str)[:1500] if fj is not None else fraw.decode('utf-8','replace')[:1500])
-          flightj=None
+          fb={'departure':dep,'arrival':arr,'date':'1405-06-20','adult':2,'child':0,'infant':0,'retDate':'1405-06-23','hasReturnAirline':False}
+          hf,fr=call(PLUS+'hub/check-route','POST',fb);fj=J(fr);ft=fj.get('token') if isinstance(fj,dict) else None
+          print('FLIGHT_TOKEN',hf,S(fj),'HAS_TOKEN',bool(ft),'BODY',json.dumps(fj,ensure_ascii=False,default=str)[:1200] if fj else fr[:1200])
+          flight=None
           if ft:
-              for phase in ['serachCacheTokenTour','serachAvailTokenTour']:
-                  attempts=1 if phase=='serachCacheTokenTour' else 7
-                  for n in range(attempts):
-                      hu,_,uraw=call(BOOK+'CheapestPrice/'+phase+'/'+str(ft),'GET',headers={'authorization':st})
-                      uj=js(uraw)
-                      ob=flatten_flights(uj.get('outbound2')) if isinstance(uj,dict) else []
-                      ib=flatten_flights(uj.get('return')) if isinstance(uj,dict) else []
-                      print('FLIGHT_'+phase,'TRY',n+1,'HTTP',hu,'STATUS',status_of(uj),'OUT',len(ob),'RET',len(ib),'BYTES',len(uraw))
-                      if isinstance(uj,dict) and (ob or ib):
-                          flightj=uj
-                          if ob:
-                              print('OUT_FIRST_KEYS',list(ob[0].keys())[:100])
-                              vals=[(p,v) for p,v in walk(ob[0]) if re.search(r'(airline|time|price|adult|flight|iata|departure|arrival)',p,re.I)]
-                              print('OUT_FIRST_FIELDS',json.dumps(vals[:100],ensure_ascii=False,default=str)[:7000])
-                          if ib:
-                              print('RET_FIRST_KEYS',list(ib[0].keys())[:100])
-                              vals=[(p,v) for p,v in walk(ib[0]) if re.search(r'(airline|time|price|adult|flight|iata|departure|arrival)',p,re.I)]
-                              print('RET_FIRST_FIELDS',json.dumps(vals[:100],ensure_ascii=False,default=str)[:7000])
-                          break
-                      if phase=='serachAvailTokenTour' and n<attempts-1: time.sleep(2)
-                  if flightj: break
-          else:
-              print('NO_FLIGHT_TOKEN')
+              for ep,nmax in [('serachCacheTokenTour',1),('serachAvailTokenTour',8)]:
+                  for n in range(nmax):
+                      hu,ur=call(BOOK+'CheapestPrice/'+ep+'/'+str(ft),'GET',None,{'authorization':st});uj=J(ur)
+                      ob=fl(uj.get('outbound2')) if isinstance(uj,dict) else []; ib=fl(uj.get('return')) if isinstance(uj,dict) else []
+                      print('FLIGHT_POLL',ep,n+1,hu,S(uj),'OUT',len(ob),'RET',len(ib),'BYTES',len(ur))
+                      if ob and ib:
+                          flight=uj
+                          print('OUT_KEYS',list(ob[0])[:100]);print('RET_KEYS',list(ib[0])[:100])
+                          print('OUT_FIELDS',json.dumps([(a,b) for a,b in walk(ob[0]) if re.search(r'airline|time|price|adult|flight|iata|departure|arrival',a,re.I)][:120],ensure_ascii=False,default=str)[:8000])
+                          print('RET_FIELDS',json.dumps([(a,b) for a,b in walk(ib[0]) if re.search(r'airline|time|price|adult|flight|iata|departure|arrival',a,re.I)][:120],ensure_ascii=False,default=str)[:8000]);break
+                      if ep=='serachAvailTokenTour' and n<nmax-1:time.sleep(2)
+                  if flight:break
 
-          print('\n=== 6 HOTEL WEBSERVICE ===')
-          hw,_,wraw=call(BOOK+'hotels/app/wbRequest','POST',payload,headers={'authorization':st})
-          wj=js(wraw)
-          print('HOTEL_REQ_HTTP',hw,'STATUS',status_of(wj),'BYTES',len(wraw),'KEYS',list(wj.keys())[:30] if isinstance(wj,dict) else None)
-          hotelj=None; best=[]; bestpath=''
-          for n in range(7):
-              hr,_,rraw=call(BOOK+'hotels/app/wbResponse/','POST',payload,headers={'authorization':st})
-              rj=js(rraw); path,items=get_hotel_items(rj) if isinstance(rj,dict) else ('',[])
-              if len(items)>len(best): best=items;bestpath=path;hotelj=rj
-              print('HOTEL_RESP_TRY',n+1,'HTTP',hr,'STATUS',status_of(rj),'COUNT',len(items),'PATH',path,'BYTES',len(rraw))
-              if items and str(status_of(rj)).lower()=='success': break
-              if n<6: time.sleep(2)
+          hw,wr=call(BOOK+'hotels/app/wbRequest','POST',p,{'authorization':st});wj=J(wr)
+          print('HOTEL_REQUEST',hw,S(wj),'BYTES',len(wr),'BODY',json.dumps(wj,ensure_ascii=False,default=str)[:1200] if wj else wr[:1200])
+          best=[];bp=''
+          for n in range(8):
+              hr,rr=call(BOOK+'hotels/app/wbResponse/','POST',p,{'authorization':st});rj=J(rr);c=hotel_candidates(rj);path,items=max(c,key=lambda z:len(z[1]),default=('',[]))
+              if len(items)>len(best):best=items;bp=path
+              print('HOTEL_POLL',n+1,hr,S(rj),'COUNT',len(items),'PATH',path,'BYTES',len(rr))
+              if items and str(S(rj)).lower()=='success':break
+              if n<7:time.sleep(2)
           if best:
-              print('HOTEL_WS_COUNT',len(best),'PATH',bestpath)
-              print('HOTEL_WS_FIRST_KEYS',list(best[0].keys())[:100])
-              vals=[(p,v) for p,v in walk(best[0]) if re.search(r'(hotel|name|star|price|adult|total|room)',p,re.I)]
-              print('HOTEL_WS_FIRST_FIELDS',json.dumps(vals[:120],ensure_ascii=False,default=str)[:8000])
+              print('HOTEL_COUNT',len(best),'PATH',bp,'KEYS',list(best[0])[:100])
+              print('HOTEL_FIELDS',json.dumps([(a,b) for a,b in walk(best[0]) if re.search(r'name|star|price|adult|total|room|hotel',a,re.I)][:140],ensure_ascii=False,default=str)[:9000])
               stars=[]
               for h in best:
                   for k in ['HotelStar','hotelStar','star','Star','stars']:
                       if k in h:
-                          try: stars.append(int(float(str(h[k]).replace('★','').strip())))
-                          except: pass
+                          try:stars.append(int(float(h[k])))
+                          except:pass
                           break
-              print('HOTEL_STAR_COUNTS',dict(sorted(Counter(stars).items())))
-          else:
-              print('HOTEL_WS_NO_ITEMS')
-
-          print('\n=== FINAL ===')
-          tour_ok=isinstance(sj,dict) and str(status_of(sj)).lower()=='success'
-          flight_ok=isinstance(flightj,dict) and bool(flatten_flights(flightj.get('outbound2'))) and bool(flatten_flights(flightj.get('return')))
-          hotel_ok=bool(best)
-          print('TOUR_OK',tour_ok,'FLIGHT_OK',flight_ok,'HOTEL_WS_OK',hotel_ok)
-          print('LIVE_ROUTE',dep_iata,'-',arr_iata,'DATES','1405-06-20','1405-06-23')
-          if not (tour_ok and flight_ok and hotel_ok): sys.exit(2)
+              print('STAR_COUNTS',dict(sorted(Counter(stars).items())))
+          tour_ok=isinstance(sj,dict) and str(S(sj)).lower()=='success';flight_ok=flight is not None;hotel_ok=bool(best)
+          print('FINAL','TOUR_OK',tour_ok,'FLIGHT_OK',flight_ok,'HOTEL_OK',hotel_ok,'ROUTE',dep,arr)
+          if not (tour_ok and flight_ok and hotel_ok):sys.exit(2)
           PY
