@@ -9,8 +9,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check Chrome
-        run: google-chrome --version || chromium --version || true
+        run: google-chrome --version
       - name: Install Selenium
         run: python -m pip install --quiet selenium
-      - name: Browser-context live E2E tour API
-        run: python tools/tour_browser_probe.py
+      - name: Capture and verify live FlyYab network
+        run: python tools/tour_network_capture.py
