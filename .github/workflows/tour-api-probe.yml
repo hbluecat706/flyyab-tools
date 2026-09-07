@@ -5,12 +5,8 @@ on:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
-      - name: Check Chrome
-        run: google-chrome --version
-      - name: Install Selenium
-        run: python -m pip install --quiet selenium
-      - name: Capture and verify live FlyYab network
-        run: python tools/tour_network_capture.py
+      - name: Direct server-side FlyYab tour API
+        run: python tools/tour_direct_probe.py
