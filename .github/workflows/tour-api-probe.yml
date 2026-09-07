@@ -5,8 +5,12 @@ on:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Extract live route hydration
-        run: python tools/tour_hydration_probe.py
+      - name: Check Chrome
+        run: google-chrome --version || chromium --version || true
+      - name: Install Selenium
+        run: python -m pip install --quiet selenium
+      - name: Browser-context live E2E tour API
+        run: python tools/tour_browser_probe.py
